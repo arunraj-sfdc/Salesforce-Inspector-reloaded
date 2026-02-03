@@ -52,6 +52,8 @@ class Model {
     this.activeBatches = 0;
     this.isProcessingQueue = false;
     this.importState = null;
+    this.history = [];
+    this.future = [];
     this.greyOutSkippedColumns = localStorage.getItem("greyOutSkippedColumns") === "true";
     this.showStatus = {
       Queued: true,
@@ -186,6 +188,8 @@ class Model {
     }
     this.dataError = "";
     let header = data.shift().map((c, index) => this.makeColumn(c, index));
+    this.history = [];
+    this.future = [];
     this.updateResult(null); // Two updates, the first clears state from the scrolltable
     this.updateResult({header, data});
 
@@ -320,44 +324,44 @@ class Model {
   columnList() {
     let self = this;
     return Array.from(function* () {
-      let importAction = self.importAction;
+        let importAction = self.importAction;
 
-      if (importAction == "delete" || importAction == "undelete") {
-        yield "Id";
-      } else if (importAction == "deleteMetadata") {
-        yield "DeveloperName";
-      } else {
-        let sobjectName = self.importType;
+        if (importAction == "delete" || importAction == "undelete") {
+          yield "Id";
+        } else if (importAction == "deleteMetadata") {
+          yield "DeveloperName";
+        } else {
+          let sobjectName = self.importType;
         let sobjectDescribe = self.describeInfo.describeSobject(self.apiType == "Tooling", sobjectName).sobjectDescribe;
-        if (sobjectDescribe) {
-          let idFieldName = self.idFieldName();
-          for (let field of sobjectDescribe.fields) {
-            if (field.createable || field.updateable) {
-              yield field.name;
-              for (let referenceSobjectName of field.referenceTo) {
+          if (sobjectDescribe) {
+            let idFieldName = self.idFieldName();
+            for (let field of sobjectDescribe.fields) {
+              if (field.createable || field.updateable) {
+                yield field.name;
+                for (let referenceSobjectName of field.referenceTo) {
                 let referenceSobjectDescribe = self.describeInfo.describeSobject(self.apiType == "Tooling", referenceSobjectName).sobjectDescribe;
-                if (referenceSobjectDescribe) {
-                  for (let referenceField of referenceSobjectDescribe.fields) {
-                    if (referenceField.idLookup) {
+                  if (referenceSobjectDescribe) {
+                    for (let referenceField of referenceSobjectDescribe.fields) {
+                      if (referenceField.idLookup) {
                       yield field.relationshipName + ":" + referenceSobjectDescribe.name + ":" + referenceField.name;
+                      }
                     }
                   }
                 }
-              }
             } else if (field.idLookup && field.name.toLowerCase() == idFieldName.toLowerCase()) {
-              yield field.name;
-            } else if (importAction == "upsertMetadata") {
-              if (["DeveloperName", "MasterLabel"].includes(field.name) || field.custom) {
                 yield field.name;
+              } else if (importAction == "upsertMetadata") {
+              if (["DeveloperName", "MasterLabel"].includes(field.name) || field.custom) {
+                  yield field.name;
+                }
               }
             }
           }
         }
-      }
-      yield "__Status";
-      yield "__Id";
-      yield "__Action";
-      yield "__Errors";
+        yield "__Status";
+        yield "__Id";
+        yield "__Action";
+        yield "__Errors";
     }());
   }
 
@@ -605,7 +609,7 @@ class Model {
         : cells[statusColumnIndex].toLowerCase() == "processing" && !this.isWorking() ? "Queued"
         : cells[statusColumnIndex].toLowerCase() == "processing" ? "Processing"
         : cells[statusColumnIndex].toLowerCase() == "succeeded" ? "Succeeded"
-        : "Failed";
+                    : "Failed";
       counts[status]++;
       taggedRows.push({status, cells});
     }
@@ -663,11 +667,11 @@ class Model {
       return;
     }
     this.importData.importTable.header = this.importData.importTable.header.map(c => {
-      if (!c) {
+        if (!c) {
+          return c;
+        }
+        c.columnValue = this.guessColumn(c.columnOriginalValue);
         return c;
-      }
-      c.columnValue = this.guessColumn(c.columnOriginalValue);
-      return c;
     });
 
   }
@@ -883,62 +887,117 @@ class Model {
 
     this.spinFor(sfConn.soap(wsdl, importAction, importArgs, headers).then(res => {
 
-      let results = sfConn.asArray(res);
-      for (let i = 0; i < results.length; i++) {
-        let result = results[i];
-        let row = batchRows[i];
-        if (result.success == "true") {
-          row[statusColumnIndex] = "Succeeded";
+            let results = sfConn.asArray(res);
+            for (let i = 0; i < results.length; i++) {
+              let result = results[i];
+              let row = batchRows[i];
+              if (result.success == "true") {
+                row[statusColumnIndex] = "Succeeded";
           row[actionColumnIndex]
             = importAction == "create" ? "Inserted"
             : importAction == "update" ? "Updated"
             : importAction == "upsert" || importAction == "upsertMetadata" ? (result.created == "true" ? "Inserted" : "Updated")
             : importAction == "delete" || importAction == "deleteMetadata" ? "Deleted"
             : importAction == "undelete" ? "Undeleted"
-            : "Unknown";
-        } else {
-          row[statusColumnIndex] = "Failed";
-          row[actionColumnIndex] = "";
-        }
-        row[resultIdColumnIndex] = result.id || "";
+                            : "Unknown";
+              } else {
+                row[statusColumnIndex] = "Failed";
+                row[actionColumnIndex] = "";
+              }
+              row[resultIdColumnIndex] = result.id || "";
         row[errorColumnIndex] = sfConn.asArray(result.errors).map(errorNode =>
           errorNode.statusCode
           + ": " + errorNode.message
           + " [" + sfConn.asArray(errorNode.fields).join(", ") + "]"
         ).join(", ");
-      }
-      this.consecutiveFailures = 0;
+            }
+            this.consecutiveFailures = 0;
     }, err => {
-      if (err.name != "SalesforceSoapError") {
-        throw err; // Not an HTTP error response
-      }
-      let errorText = err.message;
-      for (let row of batchRows) {
-        row[statusColumnIndex] = "Failed";
-        row[resultIdColumnIndex] = "";
-        row[actionColumnIndex] = "";
-        row[errorColumnIndex] = errorText;
-      }
-      this.consecutiveFailures++;
-      // If a whole batch has failed (as opposed to individual records failing),
-      // too many times in a row, we stop the import.
-      // This is useful when an error will affect all batches, for example a field name being misspelled.
-      // This also helps prevent throtteling in Chrome.
-      // A batch failing might not affect all batches, so we wait for a few consecutive errors before we stop.
-      // For example, a whole batch will fail if one of the field values is of an incorrect type or format.
-      if (this.consecutiveFailures >= 3) {
-        this.isProcessingQueue = false;
-      }
+            if (err.name != "SalesforceSoapError") {
+              throw err; // Not an HTTP error response
+            }
+            let errorText = err.message;
+            for (let row of batchRows) {
+              row[statusColumnIndex] = "Failed";
+              row[resultIdColumnIndex] = "";
+              row[actionColumnIndex] = "";
+              row[errorColumnIndex] = errorText;
+            }
+            this.consecutiveFailures++;
+            // If a whole batch has failed (as opposed to individual records failing),
+            // too many times in a row, we stop the import.
+            // This is useful when an error will affect all batches, for example a field name being misspelled.
+            // This also helps prevent throtteling in Chrome.
+            // A batch failing might not affect all batches, so we wait for a few consecutive errors before we stop.
+            // For example, a whole batch will fail if one of the field values is of an incorrect type or format.
+            if (this.consecutiveFailures >= 3) {
+              this.isProcessingQueue = false;
+            }
     }).then(() => {
-      this.activeBatches--;
-      this.updateResult(this.importData.importTable);
-      this.executeBatch();
+          this.activeBatches--;
+          this.updateResult(this.importData.importTable);
+          this.executeBatch();
     }).catch(error => {
-      console.error("Unexpected exception", error);
-      this.isProcessingQueue = false;
+          console.error("Unexpected exception", error);
+          this.isProcessingQueue = false;
     }));
   }
 
+  saveState() {
+    if (this.importData && this.importData.importTable) {
+      // Deep copy the data to history
+      let deepCopy = this.importData.importTable.data.map((row) => [...row]);
+      this.history.push(deepCopy);
+      this.future = [];
+    }
+  }
+
+  undo() {
+    if (this.history.length > 0) {
+      let currentData = this.importData.importTable.data.map((row) => [...row]);
+      this.future.push(currentData);
+      let previousData = this.history.pop();
+      this.importData.importTable.data = previousData;
+      this.updateResult(this.importData.importTable);
+      this.didUpdate();
+    }
+  }
+
+  redo() {
+    if (this.future.length > 0) {
+      let currentData = this.importData.importTable.data.map((row) => [...row]);
+      this.history.push(currentData);
+      let nextData = this.future.pop();
+      this.importData.importTable.data = nextData;
+      this.updateResult(this.importData.importTable);
+      this.didUpdate();
+    }
+  }
+
+  updateCell(rowIndex, colIndex, newValue) {
+    if (
+      this.importData &&
+      this.importData.importTable &&
+      this.importData.importTable.data[rowIndex]
+    ) {
+      this.saveState();
+      this.importData.importTable.data[rowIndex][colIndex] = newValue;
+      this.didUpdate();
+    }
+  }
+
+  updateCells(updates) {
+    if (this.importData && this.importData.importTable) {
+      this.saveState();
+      for (let { r, c, val } of updates) {
+        if (this.importData.importTable.data[r]) {
+          this.importData.importTable.data[r][c] = val;
+        }
+      }
+      this.updateResult(this.importData.importTable);
+      this.didUpdate();
+    }
+  }
 }
 
 function csvSerialize(table, separator) {
@@ -969,6 +1028,8 @@ class App extends React.Component {
     this.onSkipAllUnknownFieldsClick = this.onSkipAllUnknownFieldsClick.bind(this);
     this.onConfirmPopupYesClick = this.onConfirmPopupYesClick.bind(this);
     this.onConfirmPopupNoClick = this.onConfirmPopupNoClick.bind(this);
+    this.onUndoClick = this.onUndoClick.bind(this);
+    this.onRedoClick = this.onRedoClick.bind(this);
     this.unloadListener = null;
     this.state = {templateValueIndex: -1};
   }
@@ -1101,6 +1162,14 @@ class App extends React.Component {
     model.confirmPopupNo();
     model.didUpdate();
   }
+  onUndoClick(e) {
+    e.preventDefault();
+    this.props.model.undo();
+  }
+  onRedoClick(e) {
+    e.preventDefault();
+    this.props.model.redo();
+  }
   onImportUndelete(model){
     //reinit import table to remove __Status column to be able to undelete rows after deleting it
     if (model.importData.importTable.header.find(c => c.columnValue == "__Status")) {
@@ -1119,7 +1188,10 @@ class App extends React.Component {
 
     addEventListener("resize", () => { this.scrollTable.viewportChange(); });
 
-    this.scrollTable = initScrollTable(this.refs.scroller);
+    this.scrollTable = initScrollTable(this.refs.scroller, {
+      onCellChange: (row, col, value) => { model.updateCell(row, col, value); },
+      onCellsChange: (updates) => { model.updateCells(updates); }
+    });
     model.resultTableCallback = this.scrollTable.dataChange;
     model.updateImportTableResult();
   }
@@ -1149,14 +1221,14 @@ class App extends React.Component {
     // Build utility items for PageHeader
     let utilityItems = [
       h("div", {
-        key: "help-btn",
+          key: "help-btn",
         className: "slds-builder-header__utilities-item slds-p-top_x-small slds-p-horizontal_x-small sfir-border-none"
-      },
+        },
       h("button", {
         className: "slds-button slds-button_icon slds-button_icon-border-filled",
-        title: "Data Import Help",
+            title: "Data Import Help",
         onClick: this.onToggleHelpClick
-      },
+          },
       h("svg", {className: "slds-button__icon", "aria-hidden": "true"},
         h("use", {xlinkHref: "symbols.svg#question"})
       )
@@ -1311,8 +1383,20 @@ class App extends React.Component {
               h("button", {disabled: !model.importCounts().Failed > 0, onClick: this.onRetryFailedClick, className: "slds-button slds-button_neutral"}, "Retry Failed"),
               h("div", {className: "slds-button-group"},
                 h("button", {disabled: !model.canCopy(), onClick: this.onCopyAsExcelClick, title: "Copy import result to clipboard for pasting into Excel or similar", className: "slds-button slds-button_neutral slds-m-horizontal_none"}, "Copy (Excel format)"),
-                h("button", {disabled: !model.canCopy(), onClick: this.onCopyAsCsvClick, title: "Copy import result to clipboard for saving as a CSV file", className: "slds-button slds-button_neutral"}, "Copy (CSV)"),
+                h("button", {disabled: !model.canCopy(), onClick: this.onCopyAsCsvClick, title: "Copy import result to clipboard for saving as a CSV file", className: "slds-button slds-button_neutral"}, "Copy (CSV)")
               ),
+              h("div", { className: "slds-button-group slds-m-left_small" },
+                h("button",{ disabled: model.history.length === 0, onClick: this.onUndoClick, className: "slds-button slds-button_icon slds-button_icon-border-filled", title: "Undo" },
+                  h("svg",{ className: "slds-button__icon", "aria-hidden": "true" },
+                    h("use", { xlinkHref: "symbols.svg#undo" })
+                  )
+                ),
+                h("button",{ disabled: model.future.length === 0, onClick: this.onRedoClick, className: "slds-button slds-button_icon slds-button_icon-border-filled", title: "Redo" },
+                  h("svg",{ className: "slds-button__icon", "aria-hidden": "true" },
+                    h("use", { xlinkHref: "symbols.svg#redo" })
+                  )
+                )
+              )
             ),
             h("div", {className: "slds-col"},
               h("div", {className: "slds-grid slds-grid_align-spread"},
@@ -1320,12 +1404,12 @@ class App extends React.Component {
                 h(StatusBox, {model, name: "Processing"}),
                 h(StatusBox, {model, name: "Succeeded"}),
                 h(StatusBox, {model, name: "Failed"})
-              ),
+              )
             ),
             h("div", {className: "slds-col slds-text-align_right"},
               h("button", {onClick: this.onCopyOptionsClick, title: "Save these import options by pasting them into Excel in the top left cell, just above the header row", className: "slds-button slds-button_neutral"}, "Copy Options"),
               h("button", {onClick: this.onSkipAllUnknownFieldsClick, disabled: !model.canSkipAllUnknownFields() || model.isWorking() || model.importCounts().Queued == 0, className: "slds-button slds-button_neutral"}, "Skip all unknown fields")
-            ),
+            )
           ),
           !model.showHelp ? null : h("div", {className: "slds-box slds-theme_info slds-m-top_medium"},
             h("h3", {className: "slds-text-heading_small slds-m-bottom_small"}, "Import Help"),
@@ -1361,11 +1445,12 @@ class App extends React.Component {
               display: "flex",
               flexDirection: "column"
             }
-          },
+            },
           h(
             "div",
             {
               ref: "scroller",
+              key: "scroller",
               style: {
                 flex: "1 1 0",
                 minHeight: 0,
@@ -1374,26 +1459,26 @@ class App extends React.Component {
               }
             }
           ),
-          model.confirmPopup ? h("div", {},
+          model.confirmPopup ? h("div", { key: "popup" },
             h("section",
-              {
-                role: "dialog",
-                tabIndex: -1,
+                  {
+                    role: "dialog",
+                    tabIndex: -1,
                 className: "slds-modal slds-fade-in-open slds-modal_small"
-              },
+                  },
               h("div", {className: "slds-modal__container"},
-                h(
-                  "button",
+                    h(
+                      "button",
                   {className: "slds-button slds-button_icon slds-modal__close", onClick: this.onConfirmPopupNoClick},
-                  h(
-                    "svg",
+                      h(
+                        "svg",
                     {className: "slds-button__icon slds-button__icon_large", "aria-hidden": "true"},
                     h("use", {xlinkHref: "symbols.svg#close"})
-                  ),
+                      ),
                   h("span", {className: "slds-assistive-text"}, "Cancel and close")
-                ),
-                h(
-                  "div",
+                    ),
+                    h(
+                      "div",
                   {className: "slds-modal__content slds-p-around_medium slds-modal__content_headless slds-text-align_center", id: "modal-content-id-1"},
                   h("div", {className: "slds-notify_container slds-is-relative"},
                     h("div", {className: "slds-notify slds-notify_toast slds-theme_warning", role: "status"},
@@ -1402,35 +1487,36 @@ class App extends React.Component {
                         h("svg", {className: "slds-icon slds-icon_small", "aria-hidden": "true"},
                           h("use", {xlinkHref: "/symbols.svg#warning"})
                         )
-                      ),
+                          ),
                       h("div", {className: "slds-notify__content slds-text-align_center"},
                         h("h2", {className: "slds-text-heading_small"}, "You are about to modify your data in Salesforce. This action cannot be undone.")
                       )
                     )
-                  ),
-                  h("br", {}),
+                      ),
+                      h("br", {}),
                   h("p", {className: "slds-text-heading_medium"}, model.confirmPopup.text),
-                ),
-                h(
-                  "div",
+                    ),
+                    h(
+                      "div",
                   {className: "slds-modal__footer"},
-                  h(
-                    "button",
+                      h(
+                        "button",
                     {className: "slds-button slds-button_neutral", "aria-label": "Cancel and close", onClick: this.onConfirmPopupNoClick},
                     "Cancel"
-                  ),
-                  h(
-                    "button",
+                      ),
+                      h(
+                        "button",
                     {className: "slds-button slds-button_brand", onClick: this.onConfirmPopupYesClick},
                     model.importActionName
                   )
                 )
-              ),
-            ),
-            h("div", {className: "slds-backdrop slds-backdrop_open", role: "presentation"}))
-          : null
+                  ),
+                ),
+            h("div", {className: "slds-backdrop slds-backdrop_open", role: "presentation"})
+          ) : null
         )
-      ));
+      )
+    );
   }
 }
 

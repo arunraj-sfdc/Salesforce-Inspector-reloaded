@@ -46,36 +46,6 @@
   padding-bottom: 7px;
 }
 
-#result-table table {
-  border: none;
-}
-
-#result-table table tr td:first-child {
-  border-left: none;
-  padding-left: 8px;
-}
-
-#result-table table tr:hover>td {
-  background-color: #F3F2F2;
-}
-
-.scrolltable-scrolled {
-  position: relative;
-}
-
-.scrolltable-scrolled table {
-  border-collapse: collapse;
-  position: absolute;
-}
-
-.scrolltable-cell.header {
-  font-weight: 700;
-  background-color: #FAFAF9;
-  border-top: none;
-  padding-top: 7px;
-  padding-bottom: 7px;
-}
-
 .scrolltable-cell.skipped {
   background-color: lightgrey;
 }
@@ -88,4 +58,68 @@
   top: 0;
   margin: 102px 232px 0 0;
   z-index: 2;
+}
+
+/* Hover Edit Icon */
+.scrolltable-cell .edit-icon {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  fill: #0070d2;
+  cursor: pointer;
+  display: none;
+  background: white;
+  border-radius: 2px;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
+  z-index: 2;
+}
+
+.scrolltable-cell:hover .edit-icon {
+  display: block;
+}
+
+.scrolltable-cell.active-cell {
+  z-index: 100 !important;
+}
+
+.scrolltable-cell textarea {
+  resize: none;
+  overflow: hidden;
+  display: block;
+  z-index: 1;
+}
+
+.scrolltable-cell.header {
+  z-index: 10;
+}
+
+/* Autofill Handle */
+.fill-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #0070d2;
+  border: 1px solid white;
+  right: -6px;
+  bottom: -6px;
+  z-index: 1000;
+  cursor: crosshair;
+  display: none;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+
+.scrolltable-cell.active-cell .fill-handle {
+  display: block;
+}
+
+/* Fill Preview */
+.fill-preview {
+  position: absolute;
+  border: 2px dashed #0070d2;
+  background: rgba(0, 112, 210, 0.1);
+  pointer-events: none;
+  z-index: 50;
+  display: none;
 }

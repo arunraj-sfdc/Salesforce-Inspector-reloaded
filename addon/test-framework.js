@@ -1,7 +1,7 @@
 import {sfConn, apiVersion} from "./inspector.js";
 import {popupTest} from "./popup-test.js";
 import {csvParseTest} from "./csv-parse-test.js";
-import {dataImportTest} from "./data-import-test.js";
+import {dataImportTest, dataImportUndoRedoTest} from "./data-import-test.js";
 import {dataExportTest} from "./data-export-test.js";
 import {restExploreTest} from "./rest-explore-test.js";
 
@@ -127,7 +127,9 @@ addEventListener("load", () => {
       await dataImportTest(test);
       updateProgress("dataExportTest", "dataImportTest");
       await dataExportTest(test);
-      updateProgress(null, "dataExportTest");
+      updateProgress("dataImportUndoRedoTest", "dataExportTest");
+      await dataImportUndoRedoTest(test);
+      updateProgress(null, "dataImportUndoRedoTest");
       await restExploreTest(test);
       updateProgress(null, "restExploreTest");
 

@@ -129,7 +129,62 @@ export function s(num, suffix = "s") {
   return num == 1 ? "" : suffix;
 }
 
-function renderCell(rt, cell, td) {
+function renderCell(rt, cell, td, r, c, options = {}) {
+  let cellData = cell;
+  if (typeof cell == "object" && cell !== null && cell.columnValue) {
+    cellData = cell.columnValue;
+  }
+
+  const { activeCell = {r:-1, c:-1}, activeCellValue = "", onCellChange, isRendering, lastSelection, canEditCell, renderData, initialRowHeight } = options;
+  let isActive = activeCell.r === r && activeCell.c === c;
+  let isEditable = canEditCell && canEditCell(r, c);
+
+  if (isActive && isEditable) {
+    td.textContent = "";
+    // Ghost element to force auto-sizing
+    let ghost = document.createElement("div");
+    ghost.textContent = activeCellValue + "\n ";
+    ghost.style.whiteSpace = rt.preventLineWrap !== false ? "pre" : "pre-wrap";
+    ghost.style.visibility = "hidden";
+    ghost.style.padding = "0 20px 0 4px";
+    ghost.style.minHeight = initialRowHeight + "px";
+    ghost.style.minWidth = "100px";
+    td.appendChild(ghost);
+
+    let input = document.createElement("textarea");
+    input.value = activeCellValue;
+    input.className = "slds-input";
+    input.style.position = "absolute";
+    input.style.top = "0";
+    input.style.left = "0";
+    input.style.width = "100%";
+    input.style.height = "100%";
+    input.style.zIndex = "1";
+    
+    input.addEventListener("input", () => {
+      options.activeCellValueUpdate(input.value);
+      ghost.textContent = input.value + "\n ";
+      options.selectionUpdate(input.selectionStart, input.selectionEnd);
+      renderData({ force: true });
+    });
+    input.addEventListener("blur", () => {
+      if (isRendering()) return;
+      options.deactivateCell(r, c, input.value, cellData);
+    });
+    input.addEventListener("click", e => e.stopPropagation());
+    td.appendChild(input);
+    if (options.fillHandle) {
+      td.appendChild(options.fillHandle);
+    }
+    if (isActive) {
+      if (lastSelection.start !== -1) {
+        input.setSelectionRange(lastSelection.start, lastSelection.end);
+      }
+      setTimeout(() => input.focus(), 0);
+    }
+    return;
+  }
+
   function popLink(recordInfo, label) {
     let a = document.createElement("a");
     a.href = "about:blank";
@@ -379,7 +434,26 @@ function renderCell(rt, cell, td) {
 
     td.textContent = localTime;
   } else {
-    td.textContent = cell;
+    td.textContent = cellData;
+  }
+
+  if (isEditable) {
+    td.addEventListener("click", (e) => {
+      if (e.button === 0 && !e.target.classList.contains("fill-handle")) {
+        options.activateCell(r, c, cellData || "");
+      }
+    });
+    let editIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    editIcon.setAttribute("class", "edit-icon");
+    editIcon.setAttribute("viewBox", "0 0 52 52");
+    let use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "symbols.svg#edit");
+    editIcon.appendChild(use);
+    td.appendChild(editIcon);
+    editIcon.addEventListener("click", (e) => {
+      e.stopPropagation();
+      options.activateCell(r, c, cellData || "");
+    });
   }
 }
 
@@ -404,10 +478,6 @@ We support adding new rows to the end of the table, and new cells to the end of 
 Each row may be visible or hidden.
 In addition to keeping track of the height of each cell, we keep track of the total height in order to adjust the height of the scrollable area, and we keep track of the position of the scrolled area.
 After a scroll we search for the position of the new rendered area using the position of the old scrolled area, which should be the least amount of work when the user scrolls in one direction.
-The table must have at least one row, since the code keeps track of the first rendered row.
-We assume that the height of the cells we measure sum up to the height of the table.
-We do the exact same logic for columns, as we do for rows.
-We assume that the size of a cell is not influenced by the size of other cells. Therefore we style cells with `white-space: pre`.
 
 @param element A scrollable DOM element to render the table within.
 ScrollTable initScrollTable(DOMElement element);
@@ -429,7 +499,8 @@ interface ScrollTable {
   void dataChange(Table newData); // Must be called whenever the data changes. (even if it is the same object)
 }
 */
-export function initScrollTable(scroller) {
+export function initScrollTable(scroller, config = {}) {
+  const { onCellChange, onCellsChange } = config;
   let data = null;
   let scrolled = document.createElement("div");
   scrolled.className = "scrolltable-scrolled";
@@ -459,6 +530,25 @@ export function initScrollTable(scroller) {
   let firstColLeft = 0;
   let lastColIdx = 0;
   let lastColLeft = 0;
+
+  let activeCell = { r: -1, c: -1 }, activeCellValue = "", lastSelection = { start: -1, end: -1 };
+  let isRendering = false;
+
+  function canEditCell(r, c) {
+    if (!data || r < headerRows) return false;
+    let cell = data.table[r][c];
+    if (typeof cell == "object" && cell !== null && !cell.columnValue) return false;
+    let colName = data.table[0][c];
+    if (typeof colName == "object" && colName.columnValue) colName = colName.columnValue;
+    if (!colName || typeof colName !== "string" || colName.startsWith("_")) return false;
+    let statusColIndex = data.table[0].findIndex(h => (h.columnValue || h) === "__Status");
+    if (statusColIndex !== -1) {
+      let status = data.table[r][statusColIndex];
+      if (typeof status == "object" && status !== null) status = status.columnValue;
+      if (status === "Success" || status === "Inserted" || status === "Updated" || status === "Deleted") return false;
+    }
+    return true;
+  }
 
   function updateBuffers() {
     // Recalculate buffers when viewport changes
@@ -554,6 +644,8 @@ export function initScrollTable(scroller) {
   }
 
   function renderData({force}) {
+    if (isRendering) return;
+    isRendering = true;
     try {
       console.log("Rendering data. Force:", force);
       scrollTop = scroller.scrollTop;
@@ -604,13 +696,11 @@ export function initScrollTable(scroller) {
       }
 
       scrolled.textContent = "";
+      scrolled.appendChild(fillPreview);
 
       let table = document.createElement("table");
       table.className = "slds-table slds-table_cell-buffer slds-table_bordered slds-table_col-bordered slds-is-relative";
       let cellsVisible = false;
-
-      // Ensure firstRowIdx never goes below headerRows
-      firstRowIdx = Math.max(headerRows, firstRowIdx);
 
       // Render header rows separately to ensure they're always visible
       for (let r = 0; r < headerRows; r++) {
@@ -625,14 +715,15 @@ export function initScrollTable(scroller) {
           if (colVisible[c] == 0) continue;
           let cell = row[c];
           let td = document.createElement("td");
-          let cellClasses = `scrolltable-cell header ${(cell.startsWith("_") && greyOutSkippedColumns) ? "skipped" : ""}`;
+          let cellName = typeof cell == "object" ? cell.columnValue : cell;
+          let cellClasses = `scrolltable-cell header ${(cellName && cellName.startsWith("_") && greyOutSkippedColumns) ? "skipped" : ""}`;
           if (data.preventLineWrap !== false) {
             cellClasses += " prevent-line-wrap";
           }
           td.className = cellClasses;
           td.style.minWidth = colWidths[c] + "px";
           td.style.height = rowHeights[r] + "px";
-          renderCell(data, cell, td);
+          renderCell(data, cell, td, r, c);
           tr.appendChild(td);
         }
         table.appendChild(tr);
@@ -659,37 +750,61 @@ export function initScrollTable(scroller) {
           if (data.preventLineWrap !== false) {
             cellClasses += " prevent-line-wrap";
           }
+          if (activeCell.r === r && activeCell.c === c) {
+            cellClasses += " active-cell";
+          }
           td.className = cellClasses;
           td.style.minWidth = colWidths[c] + "px";
           td.style.height = rowHeights[r] + "px";
-          renderCell(data, cell, td);
+          renderCell(data, cell, td, r, c, {
+            activeCell, activeCellValue, onCellChange, isRendering: () => isRendering, lastSelection, canEditCell, renderData, initialRowHeight,
+            fillHandle: (activeCell.r === r && activeCell.c === c) ? fillHandle : null,
+            activeCellValueUpdate: val => activeCellValue = val,
+            selectionUpdate: (s, e) => lastSelection = {start: s, end: e},
+            activateCell: (row, col, val) => { activeCell = {r: row, c: col}; activeCellValue = val; lastSelection = {start:-1, end:-1}; renderData({force: true}); },
+            deactivateCell: (row, col, val, oldVal) => {
+              activeCell = {r: -1, c: -1}; activeCellValue = "";
+              if (val !== (oldVal || "")) onCellChange(row - headerRows, col, val);
+              else renderData({force: true});
+            }
+          });
           tr.appendChild(td);
           cellsVisible = true;
         }
         table.appendChild(tr);
       }
 
-      // Adjust table position to prevent header overlap at the top
-      let tableTop = Math.max(0, firstRowTop);
-      table.style.top = tableTop + "px";
-      table.style.left = firstColLeft + "px";
+      // Calculate the virtual position for the table
+      // We always prepend the header, so the table starts at (vTop of first data row) - (header height)
+      let headerHeight = 0;
+      for (let r = 0; r < headerRows; r++) if (rowVisible[r]) headerHeight += rowHeights[r];
+      
+      let dataRowIdx = Math.max(headerRows, firstRowIdx);
+      let dataRowTop = 0;
+      for (let r = 0; r < dataRowIdx; r++) if (rowVisible[r]) dataRowTop += rowHeights[r];
+
+      table.style.top = (dataRowTop - headerHeight) + "px";
+      table.style.left = firstColLeft + "px"; // Simplified left since headerCols is 0
       scrolled.appendChild(table);
 
       if (cellsVisible) {
-        // Start adjusting heights from the first data row, not header
-        let tr = table.children[headerRows];
-        for (let r = Math.max(headerRows, firstRowIdx); r < lastRowIdx; r++) {
-          if (rowVisible[r] == 0) {
-            continue;
+        // Adjust heights for all rendered rows including header
+        let tr = table.firstElementChild;
+        let renderedRows = Array.from(table.children);
+        renderedRows.forEach((rowTr, i) => {
+          let r = i < headerRows ? i : Math.max(headerRows, firstRowIdx) + (i - headerRows);
+          if (rowVisible[r]) {
+            let rowRect = rowTr.firstElementChild.getBoundingClientRect();
+            let oldHeight = rowHeights[r];
+            let newHeight = Math.max(oldHeight, rowRect.height);
+            if (newHeight !== oldHeight) {
+              rowHeights[r] = newHeight;
+              totalHeight += newHeight - oldHeight;
+              lastRowTop += newHeight - oldHeight;
+            }
           }
-          let rowRect = tr.firstElementChild.getBoundingClientRect();
-          let oldHeight = rowHeights[r];
-          let newHeight = Math.max(oldHeight, rowRect.height);
-          rowHeights[r] = newHeight;
-          totalHeight += newHeight - oldHeight;
-          lastRowTop += newHeight - oldHeight;
-          tr = tr.nextElementSibling;
-        }
+        });
+
         let td = table.firstElementChild.firstElementChild;
         for (let c = firstColIdx; c < lastColIdx; c++) {
           if (colVisible[c] == 0) {
@@ -704,24 +819,112 @@ export function initScrollTable(scroller) {
           td = td.nextElementSibling;
         }
       }
+      scrolled.style.height = totalHeight + "px";
+      scrolled.style.width = totalWidth + "px";
+      if (isDraggingFill) updateFillPreview();
       console.log("Render complete");
     } catch (error) {
       console.error("Error in renderData:", error);
-      // Enhanced error logging
-      console.log("Current state:", {
-        rowCount,
-        colCount,
-        firstRowIdx,
-        lastRowIdx,
-        firstColIdx,
-        lastColIdx,
-        scrollTop,
-        scrollLeft,
-        offsetHeight,
-        offsetWidth
-      });
+    } finally {
+      isRendering = false;
     }
   }
+
+  // Autofill related state and logic
+  let fillHandle = document.createElement("div");
+  fillHandle.className = "fill-handle";
+  let fillPreview = document.createElement("div");
+  fillPreview.className = "fill-preview";
+  let isDraggingFill = false;
+  let fillStart = {r:-1, c:-1}, fillEnd = {r:-1, c:-1};
+  let autoScrollTimer = null, scrollSpeed = 0;
+  let lastMouseEvent = null;
+
+  function updateFillPreview() {
+    let minR = Math.min(fillStart.r, fillEnd.r), maxR = Math.max(fillStart.r, fillEnd.r);
+    let minC = Math.min(fillStart.c, fillEnd.c), maxC = Math.max(fillStart.c, fillEnd.c);
+    let top = 0; for (let i = 0; i < minR; i++) if (rowVisible[i]) top += rowHeights[i];
+    let left = 0; for (let i = 0; i < minC; i++) if (colVisible[i]) left += colWidths[i];
+    let height = 0; for (let i = minR; i <= maxR; i++) if (rowVisible[i]) height += rowHeights[i];
+    let width = 0; for (let i = minC; i <= maxC; i++) if (colVisible[i]) width += colWidths[i];
+    fillPreview.style.top = top + "px"; fillPreview.style.left = left + "px";
+    fillPreview.style.width = width + "px"; fillPreview.style.height = height + "px";
+  }
+
+  function updateAutofill(e) {
+    if (!isDraggingFill) return;
+    let rect = scroller.getBoundingClientRect();
+    let x = e.clientX - rect.left + scroller.scrollLeft, y = e.clientY - rect.top + scroller.scrollTop;
+    
+    let r = 0, curY = 0; while (r < rowCount && curY + rowVisible[r] * rowHeights[r] <= y) { curY += rowVisible[r] * rowHeights[r]; r++; }
+    let c = 0, curX = 0; while (c < colCount && curX + colVisible[c] * colWidths[c] <= x) { curX += colVisible[c] * colWidths[c]; c++; }
+    r = Math.max(headerRows, Math.min(r, rowCount - 1));
+    c = Math.max(0, Math.min(c, colCount - 1));
+    
+    if (fillEnd.r !== r || fillEnd.c !== c) {
+      fillEnd = { r, c };
+      updateFillPreview();
+    }
+    
+    let threshold = 30;
+    if (e.clientY < rect.top + threshold) scrollSpeed = -15;
+    else if (e.clientY > rect.bottom - threshold) scrollSpeed = 15;
+    else scrollSpeed = 0;
+
+    if (scrollSpeed !== 0 && !autoScrollTimer) {
+      autoScrollTimer = setInterval(() => { 
+        scroller.scrollTop += scrollSpeed; 
+        viewportChange();
+        if (lastMouseEvent) updateAutofill(lastMouseEvent);
+      }, 20);
+    } else if (scrollSpeed === 0 && autoScrollTimer) {
+      clearInterval(autoScrollTimer); autoScrollTimer = null;
+    }
+  }
+
+  scroller.addEventListener("mousedown", e => {
+    if (e.target.classList.contains("fill-handle")) {
+      isDraggingFill = true;
+      lastMouseEvent = e;
+      fillStart = { ...activeCell };
+      fillEnd = { ...activeCell };
+      fillPreview.style.display = "block";
+      updateFillPreview();
+      e.preventDefault();
+    }
+  });
+
+  window.addEventListener("mousemove", e => {
+    if (!isDraggingFill) return;
+    lastMouseEvent = e;
+    updateAutofill(e);
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (isDraggingFill) {
+      isDraggingFill = false;
+      fillPreview.style.display = "none";
+      if (autoScrollTimer) { clearInterval(autoScrollTimer); autoScrollTimer = null; }
+      
+      let minR = Math.min(fillStart.r, fillEnd.r), maxR = Math.max(fillStart.r, fillEnd.r);
+      let minC = Math.min(fillStart.c, fillEnd.c), maxC = Math.max(fillStart.c, fillEnd.c);
+      let sourceVal = data.table[activeCell.r][activeCell.c];
+      if (typeof sourceVal == "object" && sourceVal !== null) sourceVal = sourceVal.columnValue;
+      
+      let updates = [];
+      for (let r = minR; r <= maxR; r++) {
+        for (let c = minC; c <= maxC; c++) {
+          if (r === activeCell.r && c === activeCell.c) continue;
+          if (canEditCell(r, c)) updates.push({ r: r - headerRows, c, val: sourceVal });
+        }
+      }
+      if (updates.length > 0) {
+        if (onCellsChange) onCellsChange(updates);
+        else if (onCellChange) updates.forEach(u => onCellChange(u.r, u.c, u.val));
+        renderData({ force: true });
+      }
+    }
+  });
 
   dataChange(null);
   scroller.addEventListener("scroll", viewportChange);

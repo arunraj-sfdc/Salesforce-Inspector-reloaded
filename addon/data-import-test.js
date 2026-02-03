@@ -408,3 +408,91 @@ export async function dataImportTest(test) {
   // TODO Write test for clipboard copy
   // TODO Write test for showStatus
 }
+
+export async function dataImportUndoRedoTest(test) {
+  console.log("TEST data-import-undo-redo");
+  let {assertEquals, assertNotEquals, assert, loadPage, anonApex} = test;
+
+  let {model} = await loadPage("data-import.html");
+  let vm = model;
+
+  function waitForSpinner() {
+    return new Promise(resolve => {
+      assertEquals(undefined, model.testCallback);
+      model.testCallback = () => {
+        if (model.spinnerCount == 0) {
+          model.testCallback = undefined;
+          resolve();
+        }
+      };
+    });
+  }
+
+  // Initial Setup
+  vm.importType = "Account";
+  vm.didUpdate();
+  vm.dataFormat = "csv";
+  vm.didUpdate();
+
+  // Set initial data
+  vm.setData('Name,Website\r\nTestAcc,http://example.com');
+  vm.didUpdate();
+
+  assertEquals(1, vm.importData.importTable.data.length);
+  assertEquals("TestAcc", vm.importData.importTable.data[0][0]); // Name
+  assertEquals("http://example.com", vm.importData.importTable.data[0][1]); // Website
+  assertEquals(0, vm.history.length);
+  assertEquals(0, vm.future.length);
+
+  // Test Update Cell
+  console.log("Testing updateCell");
+  vm.updateCell(0, 0, "UpdatedAcc");
+  assertEquals("UpdatedAcc", vm.importData.importTable.data[0][0]);
+  assertEquals(1, vm.history.length);
+  assertEquals(0, vm.future.length);
+
+  // Validate History Content
+  let historyState = vm.history[0];
+  assertEquals("TestAcc", historyState[0][0]);
+
+  // Test Undo
+  console.log("Testing Undo");
+  vm.undo();
+  assertEquals("TestAcc", vm.importData.importTable.data[0][0]);
+  assertEquals(0, vm.history.length);
+  assertEquals(1, vm.future.length);
+
+  // Test Redo
+  console.log("Testing Redo");
+  vm.redo();
+  assertEquals("UpdatedAcc", vm.importData.importTable.data[0][0]);
+  assertEquals(1, vm.history.length);
+  assertEquals(0, vm.future.length);
+
+  // Test Multiple Edits
+  console.log("Testing Multiple Edits");
+  vm.updateCell(0, 1, "http://updated.com");
+  assertEquals("http://updated.com", vm.importData.importTable.data[0][1]);
+  assertEquals(2, vm.history.length);
+  assertEquals(0, vm.future.length);
+
+  // Undo Second Edit
+  vm.undo();
+  assertEquals("http://example.com", vm.importData.importTable.data[0][1]); // Reverted
+  assertEquals("UpdatedAcc", vm.importData.importTable.data[0][0]); // First edit remains
+  assertEquals(1, vm.history.length);
+  assertEquals(1, vm.future.length);
+
+  // Undo First Edit
+  vm.undo();
+  assertEquals("TestAcc", vm.importData.importTable.data[0][0]);
+  assertEquals(0, vm.history.length);
+  assertEquals(2, vm.future.length);
+
+  // Redo First Edit
+  vm.redo();
+  assertEquals("UpdatedAcc", vm.importData.importTable.data[0][0]);
+  assertEquals(1, vm.history.length);
+  assertEquals(1, vm.future.length);
+}
+
