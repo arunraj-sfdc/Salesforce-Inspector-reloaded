@@ -2,6 +2,7 @@
 
 ## Version 2.0
 
+- `Data Import` Add inline editing for Queued and Failed rows, with autofill (drag-to-copy) [feature #573](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/573) (contribution by [Arunraj Anbalagan](https://github.com/arunraj-sfdc))
 - `Data Export` Data export new tab context [issue #1080](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/1080)(contribution by [Maral Zakarian](https://github.com/MaralZak))
 - `Data Export` Add context menu (Close All, Close Others) for query tabs (contribution by [Idan Damari](https://github.com/iDamari))
 - `Data Export` Fix Save Query Menu with SLDS Styling (contribution by [Idan Damari](https://github.com/iDamari))
@@ -34,7 +35,7 @@
 - `Options` Fix export configuration file [issue #982](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/982) (issue by [Syamkumar Kanjiravelil Sasidharan](https://github.com/syamkumar-ks))
 - `Field Creator` Enable field creation for platform event objects [feature 954](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/954) (idea by [simagdo](https://github.com/simagdo))
 - Unfreeze User from User tab [feature #945](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/945) (contribution by [b-r-j](https://github.com/b-r-j))
-- `Users search`  now supports exclusion of inactive and portal users, supports customizable searchable fields and can be searched by profile name [feature 965](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/965) (contribution by [Thomas Malidin Delabriere](https://github.com/tmalidin33))
+- `Users search` now supports exclusion of inactive and portal users, supports customizable searchable fields and can be searched by profile name [feature 965](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/965) (contribution by [Thomas Malidin Delabriere](https://github.com/tmalidin33))
 - `Field Creator` UI improvement of the Options modal (contribution by [Kamil Gadawski](https://github.com/KamilGadawski))
 - `Field Creator` Permission dependency improvement [feature 931](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/931) (contribution by [DivyanshuBist](https://github.com/DivyanshuBist))
 - Enable custom banner text on Sandbox banner
